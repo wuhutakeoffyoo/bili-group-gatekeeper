@@ -3,6 +3,10 @@ __pycache__/
 *$py.class
 .venv/
 venv/
+.venv-*/
+venv-*/
+.hypothesis/
+.ruff_cache/
 data/config/*.json
 data/config/*.yaml
 data/leave_records/*.json

@@ -440,6 +440,12 @@ class GatekeeperService:
         if getattr(event, "notice_type", "") != "group_decrease":
             return
         group_id, user_id = str(event.group_id), str(event.user_id)
+        # Keep history while a configured group's review is temporarily disabled.
+        if self.config.get_group_config(group_id) is None:
+            return
+        self_id = getattr(event, "self_id", None) or getattr(bot, "self_id", "")
+        if user_id == str(self_id):
+            return
         nickname = f"用户{user_id}"
         try:
             info = await bot.get_group_member_info(group_id=int(group_id), user_id=int(user_id), no_cache=True)

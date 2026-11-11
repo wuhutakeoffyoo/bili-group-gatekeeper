@@ -564,7 +564,7 @@ async def _fetch_qq_level(bot: Bot, user_id: str, event: GroupRequestEvent | Non
     # 方式 2：加群请求事件的扩展字段（规避等级不可见）
     if event is not None:
         try:
-            event_data = event.dict()
+            event_data = event.model_dump()
         except Exception:
             event_data = {}
         if not _is_qq_level_hidden(event_data):

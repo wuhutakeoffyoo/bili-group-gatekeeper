@@ -146,14 +146,17 @@ def build_rule_condition_statuses(
         elif medal_result.state == "passed":
             statuses["medal"] = RuleConditionStatus("true")
         elif medal_result.state == "failed":
+            reason = (
+                "粉丝牌未达到要求：目标主播UID为"
+                + "、".join(str(uid) for uid in group_config.target_medal_uids)
+                + f"，持有任一位的粉丝牌且至少{group_config.required_medal_level}级即可；请核对账号和粉丝牌，满足要求后再申请"
+            )
+            detail = medal_result.detail.strip()
+            if detail and detail not in reason:
+                reason = f"{detail}；{reason}"
             statuses["medal"] = RuleConditionStatus(
                 "false",
-                configured_reject_reason(
-                    group_config, "medal",
-                    "粉丝牌未达到要求：目标主播UID为"
-                    + "、".join(str(uid) for uid in group_config.target_medal_uids)
-                    + f"，持有任一位的粉丝牌且至少{group_config.required_medal_level}级即可；请核对账号和粉丝牌，满足要求后再申请",
-                ),
+                configured_reject_reason(group_config, "medal", reason),
             )
         else:
             detail = medal_result.detail.strip() or "粉丝牌列表不可见或无法读取"

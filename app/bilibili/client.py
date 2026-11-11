@@ -135,19 +135,24 @@ class BiliApi:
         """
         发起 GET 请求并返回 JSON 响应。
 
-        自动附带 Cookie 和 User-Agent。
-        非 2xx 或非 JSON 响应会抛出 httpx.HTTPStatusError。
+        自动附带 Cookie 和 User-Agent。传输异常和 502/503/504 最多重试两次，
+        每次实际请求均受共享限流器约束；耗尽重试或响应无效时保留异常。
         """
         headers = HEADERS.copy()
         if self.cookie:
             headers["Cookie"] = self.cookie
         for attempt in range(3):
             await HTTP_LIMITER.acquire()
-            response = await self.client.get(url, headers=headers, params=params)
-            if response.status_code not in {502, 503, 504} or attempt == 2:
-                response.raise_for_status()
-                data = response.json()
-                return data if isinstance(data, dict) else {}
+            try:
+                response = await self.client.get(url, headers=headers, params=params)
+            except httpx.RequestError:
+                if attempt == 2:
+                    raise
+            else:
+                if response.status_code not in {502, 503, 504} or attempt == 2:
+                    response.raise_for_status()
+                    data = response.json()
+                    return data if isinstance(data, dict) else {}
             await asyncio.sleep(0.25 * (2**attempt) + secrets.randbelow(251) / 1000)
         return {}
 

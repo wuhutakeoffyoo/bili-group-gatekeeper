@@ -36,6 +36,8 @@ per-group review pipelines. A supported deployment runs one Bot process.
 - **Rejection explanation**: confirmed facts, requirements, and a next action,
   with configured text kept as a supplement. Unknown-state rejections explain
   incomplete verification; true-state rejections explain the configured policy.
+  A failed medal check retains its source detail alongside target UIDs and the
+  minimum level; unavailable medal data remains unknown.
 - **Identity decision lock**: process-local serialization of the QQ and Bilibili
   UID from binding lookup through decision finalization. Manual resolution and
   binding removal share the same lock manager.

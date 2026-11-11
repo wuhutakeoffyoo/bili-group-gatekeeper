@@ -10,6 +10,7 @@ from pathlib import Path
 from app.config import ConfigManager
 from app.database.async_storage import run_storage
 from app.database.legacy import initialize_database
+from app.notifications.dedup import NotificationDeduplicator
 from app.onebot.client import OneBotClient
 from app.onebot.events import OneBotEvent
 from app.onebot.inspector import OneBotRequestInspector
@@ -40,8 +41,7 @@ class Runtime:
         self.background_enabled = background_enabled
         self.started = False
         self._tasks: set[asyncio.Task] = set()
-        self._disk_level = None
-        self._disk_email_sent = False
+        self._disk_notifications = NotificationDeduplicator()
         self._cookie_notice_issue = None
 
     @property
@@ -321,19 +321,19 @@ from the durable exact-request audit, never membership or browser assertions.
             free = usage.free / (1024 ** 3)
             level = "严重" if free < .2 else "警告" if free < 1 else None
             if level is None:
-                self._disk_level, self._disk_email_sent = None, False
+                self._disk_notifications.reset()
                 return
             message = f"[磁盘告警-{level}] 日志目录所在磁盘剩余 {free:.2f} GB，请检查磁盘空间。"
         except OSError:
             level, message = "检查失败", "[磁盘告警-检查失败] 无法读取日志目录所在磁盘空间。"
-        if level != self._disk_level:
-            self._disk_level, self._disk_email_sent = level, False
         logger.warning(message)
         await self.notify(message)
-        if not self._disk_email_sent:
-            self._disk_email_sent = bool(await email_notifier.send_notification(
+        if self._disk_notifications.should_attempt(level):
+            sent = await email_notifier.send_notification(
                 f"【Bilibili QQ Group Gatekeeper 磁盘告警】{level}",
-                f"{message}\n监控路径：{path}\n仅通知，不自动清理日志或运行数据。"))
+                f"{message}\n监控路径：{path}\n仅通知，不自动清理日志或运行数据。")
+            if sent:
+                self._disk_notifications.mark_sent(level)
 
     async def close(self):
         if self.reconciler is not None:

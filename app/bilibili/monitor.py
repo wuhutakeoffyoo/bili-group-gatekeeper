@@ -18,6 +18,7 @@ from typing import Optional
 import httpx
 
 from app.notifications import email as email_notifier
+from app.notifications.dedup import NotificationDeduplicator
 from app.config import ConfigManager
 from .client import HEADERS
 from .credential import CookieManager
@@ -62,54 +63,12 @@ class CookieCheckDetail:
 # 去重状态管理
 # ---------------------------------------------------------------------------
 
-_cookie_state: dict = {
-    "current_issue_key": None,
-    "email_sent_for_current_issue": False,
-}
+_email_notifications = NotificationDeduplicator()
 
 
 def reset_dedup_state() -> None:
     """重置去重状态（用于测试）。"""
-    _cookie_state["current_issue_key"] = None
-    _cookie_state["email_sent_for_current_issue"] = False
-
-
-def _should_attempt_notification(issue_key: str) -> bool:
-    """
-    判断是否应该尝试发送邮件通知。
-
-    调用者必须在发送成功后调用 _mark_email_sent(issue_key)，
-    发送失败时不标记，下一周期自动重试。
-
-    返回:
-        True 表示应该尝试发送（首次出现该异常或上次发送失败）。
-    """
-    current_issue_key = _cookie_state["current_issue_key"]
-    already_sent = _cookie_state["email_sent_for_current_issue"]
-
-    if current_issue_key != issue_key:
-        _cookie_state["current_issue_key"] = issue_key
-        _cookie_state["email_sent_for_current_issue"] = False
-        return True
-
-    if not already_sent:
-        # 持续异常但上次发送失败，应该重试
-        return True
-
-    # 持续同类异常且上次已成功发送，去重跳过
-    return False
-
-
-def _mark_email_sent(issue_key: str) -> None:
-    """标记邮件已成功发送（仅在发送成功时调用）。"""
-    if _cookie_state["current_issue_key"] == issue_key:
-        _cookie_state["email_sent_for_current_issue"] = True
-
-
-def _mark_cookie_valid() -> None:
-    """标记 Cookie 有效，重置所有去重状态。"""
-    _cookie_state["current_issue_key"] = None
-    _cookie_state["email_sent_for_current_issue"] = False
+    _email_notifications.reset()
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +188,7 @@ async def _notify_cookie_expired(detail: CookieCheckDetail) -> None:
     发送成功后标记已通知，发送失败不标记（下一周期重试）。
     """
     issue_key = CookieCheckResult.EXPIRED.value
-    if not _should_attempt_notification(issue_key):
+    if not _email_notifications.should_attempt(issue_key):
         return
 
     subject = "【B站 Cookie 过期通知】请及时更新"
@@ -244,7 +203,7 @@ async def _notify_cookie_expired(detail: CookieCheckDetail) -> None:
 
     sent = await email_notifier.send_notification(subject, body)
     if sent:
-        _mark_email_sent(issue_key)
+        _email_notifications.mark_sent(issue_key)
         logger.info("Cookie 过期通知邮件已发送")
     else:
         # 不标记已通知，下一周期将重试
@@ -258,7 +217,7 @@ async def _notify_cookie_check_abnormal(detail: CookieCheckDetail) -> None:
     这类异常表示“当前无法可靠判断 Cookie 状态”，不会当作 Cookie 过期处理。
     """
     issue_key = detail.result.value
-    if not _should_attempt_notification(issue_key):
+    if not _email_notifications.should_attempt(issue_key):
         return
 
     result_text = {
@@ -280,7 +239,7 @@ async def _notify_cookie_check_abnormal(detail: CookieCheckDetail) -> None:
 
     sent = await email_notifier.send_notification(subject, body)
     if sent:
-        _mark_email_sent(issue_key)
+        _email_notifications.mark_sent(issue_key)
         logger.info("Cookie 检查异常通知邮件已发送: %s", result_text)
     else:
         logger.warning("Cookie 检查异常通知邮件发送失败，将在下次检查时重试")
@@ -313,7 +272,7 @@ async def run_cookie_check_once() -> CookieCheckDetail:
 
     if detail.result == CookieCheckResult.VALID:
         logger.debug("B站 Cookie 有效")
-        _mark_cookie_valid()
+        _email_notifications.reset()
     elif detail.result == CookieCheckResult.EXPIRED:
         logger.warning("B站 Cookie 已过期: %s", detail.message)
         await _notify_cookie_expired(detail)

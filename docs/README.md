@@ -1,6 +1,6 @@
 # V3 文档目录与功能核对
 
-本目录说明截至 2026-10-30 核对的 V3 独立实现，QQ 接入使用 SnowLuma 并保留 NapCat 兼容。生产基线见[迁移记录](production-acceptance-20261026.md)，后续修复与边界见[申请漏收核查](snowluma-request-incident-20261030.md)；真实 QQ 审批状态不能由文档或单元测试推断。
+本目录说明截至 2026-11-11 核对的 V3 独立实现，QQ 接入使用 SnowLuma 并保留 NapCat 兼容。生产基线见[迁移记录](production-acceptance-20261026.md)，后续生产修复与边界见[申请漏收核查](snowluma-request-incident-20261030.md)；真实 QQ 审批状态不能由文档或单元测试推断。
 
 ## 按任务阅读
 
@@ -8,7 +8,7 @@
 | --- | --- |
 | 安装、启动、私聊命令 | [项目 README](../README.md) |
 | 默认入口、模块边界、并发与限流 | [独立运行架构](architecture.md) |
-| 首次旧配置迁移、SQL 版本、YAML 备份和回滚 | [配置与迁移](configuration.md) |
+| 配置优先级、首次旧配置迁移、SQL 版本、YAML 备份和回滚 | [配置与迁移](configuration.md) |
 | T/F/I、AST、UID/昵称、pending | [审核规则](review-requirements.md) |
 | 所有拒绝类型与可操作反馈 | [拒绝反馈](rejection-feedback.md) |
 | 手动/扫码/刷新/CookieCloud | [凭证管理](credentials.md) |
