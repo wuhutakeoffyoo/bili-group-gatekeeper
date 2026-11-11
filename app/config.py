@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import base64
 import json
+import logging
 import os
 from pathlib import Path
 import threading
@@ -31,6 +32,7 @@ from app.legacy_config import (  # noqa: F401 - compatibility reexports
 from app.settings import get_settings
 
 REDACTED = "[redacted]"
+logger = logging.getLogger(__name__)
 
 
 def _secret_key(key: str) -> bool:
@@ -184,6 +186,8 @@ class ConfigManager:
             cls._config = _validate_config(json.loads(row["config_json"]))
             cls._version = int(row["version"])
             cls._initialized = True
+            logger.info("Loaded business configuration from SQLite revision %s; group enabled values: %s",
+                        cls._version, {group_id: group.enabled for group_id, group in cls._config.groups.items()})
             return cls._config
 
     @classmethod

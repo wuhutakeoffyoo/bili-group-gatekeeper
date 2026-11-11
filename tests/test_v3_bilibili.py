@@ -122,6 +122,56 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase):
         for limiter in reversed(self.limiters):
             limiter.stop()
 
+    async def test_get_retries_transport_and_gateway_failures_with_shared_budget_and_pacing(self):
+        attempts = []
+        def respond(request):
+            attempts.append(request)
+            if len(attempts) == 1:
+                raise httpx.ConnectError("connection reset", request=request)
+            return httpx.Response(503 if len(attempts) == 2 else 200, json={"code": 0})
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            api = BiliApi("SESSDATA=fixture", client=client)
+            with patch("app.bilibili.client.asyncio.sleep", new=AsyncMock()) as sleep, patch(
+                "app.bilibili.client.HTTP_LIMITER.acquire", new=AsyncMock()
+            ) as acquire:
+                self.assertEqual(await api._get("https://example.invalid/list", {"pn": 2}), {"code": 0})
+            self.assertEqual(acquire.await_count, 3)
+            self.assertEqual(sleep.await_count, 2)
+            self.assertTrue(all(request.url.params["pn"] == "2" for request in attempts))
+            self.assertTrue(all(request.headers["Cookie"] == "SESSDATA=fixture" for request in attempts))
+
+    async def test_exhausted_get_transport_errors_stay_inaccessible_and_cancellation_is_immediate(self):
+        for error_type, count in [(httpx.ReadTimeout, 3), (asyncio.CancelledError, 1)]:
+            attempts = []
+            def respond(request):
+                attempts.append(request)
+                if error_type is asyncio.CancelledError:
+                    raise asyncio.CancelledError()
+                raise error_type("timeout", request=request)
+            async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+                api = BiliApi(client=client)
+                with patch("app.bilibili.client.asyncio.sleep", new=AsyncMock()) as sleep:
+                    if error_type is asyncio.CancelledError:
+                        with self.assertRaises(asyncio.CancelledError):
+                            await api.get_user_profile_by_uid(42)
+                    else:
+                        self.assertEqual((await api.get_user_profile_by_uid(42)).state, "inaccessible")
+                self.assertEqual(len(attempts), count)
+                self.assertEqual(sleep.await_count, count - 1)
+
+    async def test_get_does_not_retry_http_rejections_or_invalid_json(self):
+        for response in [httpx.Response(403), httpx.Response(429), httpx.Response(200, text="not JSON")]:
+            requests = []
+            def respond(request):
+                requests.append(request)
+                return response
+            async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+                with patch("app.bilibili.client.asyncio.sleep", new=AsyncMock()) as sleep:
+                    with self.assertRaises((httpx.HTTPStatusError, ValueError)):
+                        await BiliApi(client=client)._get("https://example.invalid/list")
+                self.assertEqual(len(requests), 1)
+                sleep.assert_not_awaited()
+
     async def test_uid_outside_storage_range_fails_locally_without_search(self):
         api = BiliApi('fixture')
         api._get = AsyncMock()

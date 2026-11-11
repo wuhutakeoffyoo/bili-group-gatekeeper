@@ -222,15 +222,8 @@ def _apply_schema_migrations(connection: sqlite3.Connection) -> None:
         try:
             with connection:
                 migration(connection)
-                # PRAGMA user_version 不支持绑定参数，版本集合固定，故用字面量
-                if version == 1:
-                    connection.execute("PRAGMA user_version = 1")
-                elif version == 2:
-                    connection.execute("PRAGMA user_version = 2")
-                elif version == 3:
-                    connection.execute("PRAGMA user_version = 3")
-                elif version == 4:
-                    connection.execute("PRAGMA user_version = 4")
+                # PRAGMA cannot bind parameters; version is an internal range integer.
+                connection.execute(f"PRAGMA user_version = {version}")
         except Exception:
             logger.exception("SQLite 架构迁移失败：v%s", version)
             raise

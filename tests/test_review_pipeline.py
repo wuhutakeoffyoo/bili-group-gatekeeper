@@ -1003,7 +1003,7 @@ class QQLevelTests(unittest.IsolatedAsyncioTestCase):
                 return_value={"qqLevel": 0, "isHideQQLevel": "true"}
             )
         )
-        event = SimpleNamespace(dict=lambda: {"qqLevel": 86})
+        event = SimpleNamespace(model_dump=lambda: {"qqLevel": 86})
 
         qq_level = await manager_main._fetch_qq_level(bot, "1000000003", event)
 

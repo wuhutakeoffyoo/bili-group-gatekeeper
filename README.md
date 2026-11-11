@@ -127,14 +127,15 @@ on_unknown: [ignore, notify_admin]
 | `/待确认审批` | 超级管理员；查看未知动作 |
 | `/确认审批 <审计ID> <applied\|failed>` | 超级管理员；核对真实结果后恢复记录 |
 
-`/设置群` 参数：`enable`、`required_qq_level`、`required_bili_level`、`target_uids`、`target_medal_uids`、`required_medal_level`、`reject_reason_with_leave_time`、`reject_reasons`。例如：
+`/设置群` 参数：`enable`、`required_qq_level`、`required_bili_level`、`target_uids`、`target_medal_uids`、`required_medal_level`、`reject_reason_with_leave_time`、`reject_reasons`、`custom_reject_uids`。例如：
 
 ```text
 /设置群 123456789 required_qq_level 4 required_bili_level 2
 /设置群 123456789 reject_reasons '{"qq_level":"本群设有等级门槛"}'
+/设置群 123456789 custom_reject_uids '{"12345":"请联系管理员核实"}'
 ```
 
-限制名单、内嵌管道、所有权和巡检等完整策略通过管理界面/版本化配置维护。只创建群号不会生成审核管道。`/检查bili` 未提供 QQ，QQ 等级、退群和绑定条件为 I，不代表真实申请会得到相同结果。
+`custom_reject_uids` 整项替换本群名单，传入 `'{}'` 可清空；各参数全部校验成功后才保存。内嵌管道、所有权和巡检等完整策略通过管理界面/版本化配置维护。只创建群号不会生成审核管道。`/检查bili` 未提供 QQ，QQ 等级、退群和绑定条件为 I，不代表真实申请会得到相同结果。
 
 ## 凭证与运行风险
 

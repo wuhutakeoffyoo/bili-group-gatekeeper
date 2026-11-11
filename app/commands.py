@@ -6,7 +6,7 @@ import logging
 import shlex
 
 from app.bilibili.credential import CookieManager
-from app.config import parse_bool, parse_reject_reasons, parse_uid_list
+from app.config import parse_bool, parse_custom_reject_uids, parse_reject_reasons, parse_uid_list
 from app.database.async_storage import run_storage
 from app.database.leaves import LeaveRecordManager
 from app.database.records import JoinRequestRecordManager
@@ -97,7 +97,7 @@ class CommandService:
             "群聊及非管理员消息不回复。命令英文字母不区分大小写。",
             "开关支持 on/off、true/false、1/0。",
             "设置群参数：enable、required_qq_level、required_bili_level、target_uids、",
-            "target_medal_uids、required_medal_level、reject_reason_with_leave_time、reject_reasons。",
+            "target_medal_uids、required_medal_level、reject_reason_with_leave_time、reject_reasons、custom_reject_uids。",
             "审核流程通过管理控制台保存至 SQLite，支持 when 表达式或兼容 conditions + mode。",
             "/检查bili 不写申请、绑定、退群记录；未提供 QQ 的条件按无法判断参与模拟。",
         ])
@@ -105,7 +105,7 @@ class CommandService:
     async def set_group(self, actor, raw):
         args = split_arguments(raw)
         if not args:
-            raise CommandReply("用法：/设置群 <群号> [<参数名> <值> ...]\n示例：/设置群 123456789 enable on required_qq_level 32\n参数：enable、required_qq_level、required_bili_level、target_uids、target_medal_uids、required_medal_level、reject_reason_with_leave_time、reject_reasons。")
+            raise CommandReply("用法：/设置群 <群号> [<参数名> <值> ...]\n示例：/设置群 123456789 enable on required_qq_level 32\n参数：enable、required_qq_level、required_bili_level、target_uids、target_medal_uids、required_medal_level、reject_reason_with_leave_time、reject_reasons、custom_reject_uids。")
         group_id = args[0]
         if not group_id.isdigit():
             raise CommandReply("群号需要填写纯数字")
@@ -127,7 +127,13 @@ class CommandService:
                     raise CommandReply(f"{key} 不能小于 0")
                 setattr(group, key, value)
             elif key in {"target_uids", "target_medal_uids"}:
-                setattr(group, key, parse_uid_list(value))
+                try:
+                    uids = parse_uid_list(value)
+                    if any(not 0 < uid <= 2**63 - 1 for uid in uids):
+                        raise ValueError("UID out of range")
+                except (ValueError, TypeError):
+                    raise CommandReply(f"{key} 需要输入有效的正整数 UID，多个用逗号分隔") from None
+                setattr(group, key, uids)
             elif key == "reject_reason_with_leave_time":
                 group.reject_reason_with_leave_time = parse_bool(value)
             elif key == "reject_reasons":
@@ -135,6 +141,15 @@ class CommandService:
                     group.reject_reasons = parse_reject_reasons(value)
                 except (ValueError, TypeError):
                     raise CommandReply("reject_reasons 需要输入合法的 JSON 对象") from None
+            elif key == "custom_reject_uids":
+                try:
+                    restrictions = parse_custom_reject_uids(value)
+                    if any(not uid.isascii() or not uid.isdigit() or not 0 < int(uid) <= 2**63 - 1
+                           for uid in restrictions):
+                        raise ValueError("Invalid UID")
+                    group.custom_reject_uids = restrictions
+                except (ValueError, TypeError):
+                    raise CommandReply('custom_reject_uids 需要输入 UID 到拒绝原因的 JSON 对象，例如 {"12345":"拒绝原因"}') from None
             else:
                 raise CommandReply(f"不支持的参数：{key}")
             updated.append(key)

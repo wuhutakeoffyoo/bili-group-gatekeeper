@@ -261,10 +261,84 @@ class RuntimeWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(list(rows)), height)
         self.assertEqual(info['bitdepth'], 1)
 
+    async def test_invalid_group_arguments_leave_all_fields_and_version_unchanged(self):
+        commands = CommandService(self.service)
+        before = ConfigManager.get_group_config("10").model_dump()
+        version = ConfigManager.get_version()
+        for arguments, field in [
+            ("target_uids abc", "target_uids"),
+            ("target_medal_uids 0", "target_medal_uids"),
+            ("target_uids 9223372036854775808", "target_uids"),
+            ("reject_reasons '[]'", "reject_reasons"),
+            ("reject_reasons '{invalid}'", "reject_reasons"),
+            ("custom_reject_uids '[]'", "custom_reject_uids"),
+            ('custom_reject_uids \'{"abc":"reason"}\'', "custom_reject_uids"),
+        ]:
+            with self.subTest(arguments=arguments):
+                reply = await commands.dispatch("1", {"message_type": "private", "user_id": 1,
+                    "message": f"/设置群 10 required_qq_level 99 {arguments}"})
+                self.assertIn(field, reply)
+                self.assertIn("需要输入", reply)
+                self.assertEqual(ConfigManager.get_version(), version)
+                self.assertEqual(ConfigManager.get_group_config("10").model_dump(), before)
+
+    async def test_custom_reject_uid_command_persists_and_clears_only_the_selected_field(self):
+        commands = CommandService(self.service)
+        before = ConfigManager.get_group_config("10").model_dump()
+        event = {"message_type": "private", "user_id": 1,
+                 "message": '/设置群 10 custom_reject_uids \'{"456":"请联系管理员"}\''}
+        self.assertIn("配置已更新", await commands.dispatch("1", event))
+        ConfigManager.reset_state()
+        ConfigManager.initialize(self.settings)
+        after = ConfigManager.get_group_config("10").model_dump()
+        self.assertEqual(after.pop("custom_reject_uids"), {"456": "请联系管理员"})
+        before.pop("custom_reject_uids")
+        self.assertEqual(after, before)
+        self.assertEqual(ConfigManager.get_bili_cookie(), "SESSDATA=test")
+        await self.runtime.handle_event(self.request(), self.client)
+        self.assertFalse(self.client.actions[0]["approve"])
+        self.assertIn("请联系管理员", self.client.actions[0]["reason"])
+        event["message"] = "/设置群 10 custom_reject_uids '{}'"
+        self.assertIn("配置已更新", await commands.dispatch("1", event))
+        self.assertEqual(ConfigManager.get_group_config("10").custom_reject_uids, {})
+
+    async def test_medal_failure_detail_survives_feedback_and_audit(self):
+        self.group.target_medal_uids = [22]
+        self.group.required_medal_level = 10
+        self.group.reject_reasons = {"medal": "请检查本群粉丝牌要求"}
+        self.group.review_stages = [ReviewStageConfig(index=1, name="粉丝牌", conditions=["medal"],
+            on_true=["approve"], on_false=["reject"], on_unknown=["ignore"])]
+        ConfigManager.set_group_config(self.group)
+        detail = "目标 UID 22 的粉丝牌当前为3级"
+        self.bili.api.check_medal_any_status = AsyncMock(return_value=CheckResult("failed", detail, matched_level=3))
+        await self.runtime.handle_event(self.request(), self.client)
+        self.assertFalse(self.client.actions[0]["approve"])
+        self.assertIn(detail, self.client.actions[0]["reason"])
+        audit = JoinRequestRecordManager.get_user_audits("200")[0]
+        reason = audit.condition_reasons["medal"]
+        for expected in (detail, "至少10级", "请检查本群粉丝牌要求"):
+            self.assertIn(expected, reason)
+        self.assertEqual(audit.condition_states["medal"], "false")
+
     async def test_decrease_records_departure_and_invokes_policy_hook(self):
         await self.runtime.handle_event({"post_type": "notice", "notice_type": "group_decrease", "group_id": 10, "user_id": 200}, self.client)
         self.assertIsNotNone(LeaveRecordManager.get_leave_record("10", "200"))
         self.assertEqual(self.patrol.left, [("10", "200")])
+
+    async def test_decrease_ignores_unconfigured_groups_and_bot_without_member_lookup(self):
+        with patch.object(self.client, "get_group_member_info", new=AsyncMock()) as lookup:
+            for group_id, user_id in [(999, 200), (10, 99)]:
+                await self.runtime.handle_event({"post_type": "notice", "notice_type": "group_decrease",
+                    "group_id": group_id, "user_id": user_id, "self_id": 99}, self.client)
+                self.assertIsNone(LeaveRecordManager.get_leave_record(str(group_id), str(user_id)))
+            lookup.assert_not_awaited()
+
+    async def test_decrease_keeps_history_for_temporarily_disabled_configured_group(self):
+        self.group.enabled = False
+        ConfigManager.set_group_config(self.group)
+        await self.runtime.handle_event({"post_type": "notice", "notice_type": "group_decrease",
+            "group_id": 10, "user_id": 200}, self.client)
+        self.assertIsNotNone(LeaveRecordManager.get_leave_record("10", "200"))
 
     async def test_lifecycle_closes_injected_clients_extensions_and_http_coordinator(self):
         self.runtime.spawn(asyncio.Event().wait(), name="test-background")
@@ -294,6 +368,31 @@ class RuntimeWorkflowTests(unittest.IsolatedAsyncioTestCase):
         with patch("app.bilibili.monitor.run_cookie_check_once", AsyncMock(return_value=CookieCheckDetail(CookieCheckResult.EXPIRED))):
             await self.runtime.check_cookie_once()
         self.assertEqual(len(self.client.messages), 3)
+
+    async def test_disk_email_retries_failed_delivery_and_resets_on_level_change_and_recovery(self):
+        warn = SimpleNamespace(free=.5 * 1024**3)
+        critical = SimpleNamespace(free=.1 * 1024**3)
+        healthy = SimpleNamespace(free=2 * 1024**3)
+        sender = AsyncMock(side_effect=[False, True, True, True])
+        with patch("app.runtime.shutil.disk_usage", side_effect=[warn, warn, warn, critical, healthy, warn]), patch(
+            "app.notifications.email.send_notification", sender
+        ):
+            for _ in range(6):
+                await self.runtime.check_disk_space()
+        self.assertEqual(sender.await_count, 4)
+        self.assertIn("警告", sender.await_args_list[0].args[0])
+        self.assertIn("严重", sender.await_args_list[2].args[0])
+        self.assertIn("警告", sender.await_args_list[3].args[0])
+
+    async def test_disk_check_error_is_deduplicated_separately_from_low_space(self):
+        sender = AsyncMock(return_value=True)
+        with patch("app.runtime.shutil.disk_usage", side_effect=[OSError("unavailable"), OSError("unavailable"),
+            SimpleNamespace(free=.5 * 1024**3)]), patch("app.notifications.email.send_notification", sender):
+            for _ in range(3):
+                await self.runtime.check_disk_space()
+        self.assertEqual(sender.await_count, 2)
+        self.assertIn("检查失败", sender.await_args_list[0].args[0])
+        self.assertIn("警告", sender.await_args_list[1].args[0])
 
     async def test_single_asgi_health_routes_use_injected_runtime(self):
         from app.main import create_app
