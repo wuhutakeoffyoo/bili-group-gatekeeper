@@ -147,7 +147,7 @@ class CommandService:
                     if any(not uid.isascii() or not uid.isdigit() or not 0 < int(uid) <= 2**63 - 1
                            for uid in restrictions):
                         raise ValueError("Invalid UID")
-                    group.custom_reject_uids = restrictions
+                    group.custom_reject_uids = {str(int(uid)): reason for uid, reason in restrictions.items()}
                 except (ValueError, TypeError):
                     raise CommandReply('custom_reject_uids 需要输入 UID 到拒绝原因的 JSON 对象，例如 {"12345":"拒绝原因"}') from None
             else:

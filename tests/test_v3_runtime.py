@@ -286,7 +286,7 @@ class RuntimeWorkflowTests(unittest.IsolatedAsyncioTestCase):
         commands = CommandService(self.service)
         before = ConfigManager.get_group_config("10").model_dump()
         event = {"message_type": "private", "user_id": 1,
-                 "message": '/设置群 10 custom_reject_uids \'{"456":"请联系管理员"}\''}
+                 "message": '/设置群 10 custom_reject_uids \'{"00456":"请联系管理员"}\''}
         self.assertIn("配置已更新", await commands.dispatch("1", event))
         ConfigManager.reset_state()
         ConfigManager.initialize(self.settings)
