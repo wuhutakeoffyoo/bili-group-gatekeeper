@@ -263,6 +263,8 @@ class RuntimeWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_invalid_group_arguments_leave_all_fields_and_version_unchanged(self):
         commands = CommandService(self.service)
+        self.group.custom_reject_uids = {"789": "原有理由"}
+        ConfigManager.set_group_config(self.group)
         before = ConfigManager.get_group_config("10").model_dump()
         version = ConfigManager.get_version()
         for arguments, field in [
@@ -273,6 +275,10 @@ class RuntimeWorkflowTests(unittest.IsolatedAsyncioTestCase):
             ("reject_reasons '{invalid}'", "reject_reasons"),
             ("custom_reject_uids '[]'", "custom_reject_uids"),
             ('custom_reject_uids \'{"abc":"reason"}\'', "custom_reject_uids"),
+            ('custom_reject_uids \'{"abc":"","456":"新理由"}\'', "custom_reject_uids"),
+            ('custom_reject_uids \'{"":"reason"}\'', "custom_reject_uids"),
+            ('custom_reject_uids \'{"456":" "}\'', "custom_reject_uids"),
+            ('custom_reject_uids \'{"456":null}\'', "custom_reject_uids"),
         ]:
             with self.subTest(arguments=arguments):
                 reply = await commands.dispatch("1", {"message_type": "private", "user_id": 1,

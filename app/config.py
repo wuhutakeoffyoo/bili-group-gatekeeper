@@ -186,8 +186,8 @@ class ConfigManager:
             cls._config = _validate_config(json.loads(row["config_json"]))
             cls._version = int(row["version"])
             cls._initialized = True
-            logger.info("Loaded business configuration from SQLite revision %s; group enabled values: %s",
-                        cls._version, {group_id: group.enabled for group_id, group in cls._config.groups.items()})
+            logger.info("Loaded business configuration from SQLite revision %s (%s groups, %s enabled)",
+                        cls._version, len(cls._config.groups), sum(group.enabled for group in cls._config.groups.values()))
             return cls._config
 
     @classmethod

@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import shlex
 
 from app.bilibili.credential import CookieManager
-from app.config import parse_bool, parse_custom_reject_uids, parse_reject_reasons, parse_uid_list
+from app.config import parse_bool, parse_reject_reasons, parse_uid_list
 from app.database.async_storage import run_storage
 from app.database.leaves import LeaveRecordManager
 from app.database.records import JoinRequestRecordManager
@@ -143,11 +144,20 @@ class CommandService:
                     raise CommandReply("reject_reasons 需要输入合法的 JSON 对象") from None
             elif key == "custom_reject_uids":
                 try:
-                    restrictions = parse_custom_reject_uids(value)
-                    if any(not uid.isascii() or not uid.isdigit() or not 0 < int(uid) <= 2**63 - 1
-                           for uid in restrictions):
-                        raise ValueError("Invalid UID")
-                    group.custom_reject_uids = {str(int(uid)): reason for uid, reason in restrictions.items()}
+                    raw_restrictions = json.loads(value)
+                    if not isinstance(raw_restrictions, dict):
+                        raise ValueError("Expected a UID mapping")
+                    restrictions = {}
+                    for uid, reason in raw_restrictions.items():
+                        uid = uid.strip()
+                        if not uid.isascii() or not uid.isdigit() or not 0 < int(uid) <= 2**63 - 1:
+                            raise ValueError("Invalid UID")
+                        if isinstance(reason, dict):
+                            reason = reason.get("reason")
+                        if not isinstance(reason, str) or not reason.strip():
+                            raise ValueError("Expected a nonempty reason")
+                        restrictions[str(int(uid))] = reason.strip()
+                    group.custom_reject_uids = restrictions
                 except (ValueError, TypeError):
                     raise CommandReply('custom_reject_uids 需要输入 UID 到拒绝原因的 JSON 对象，例如 {"12345":"拒绝原因"}') from None
             else:
